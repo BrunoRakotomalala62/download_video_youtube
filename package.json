@@ -1,0 +1,14 @@
+{
+  "name": "download-video-youtube",
+  "version": "1.0.0",
+  "description": "API for downloading YouTube videos",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "@distube/ytdl-core": "^4.16.12",
+    "express": "^4.21.2"
+  }
+}
