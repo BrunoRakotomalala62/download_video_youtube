@@ -8,7 +8,6 @@ import shutil
 app = Flask(__name__)
 
 DOWNLOAD_FOLDER = tempfile.mkdtemp()
-YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY")
 
 @app.route('/')
 def home():
@@ -60,11 +59,12 @@ def search_videos():
     if not query:
         return jsonify({"error": "Paramètre 'video' requis"}), 400
     
-    if not YOUTUBE_API_KEY:
+    youtube_api_key = os.environ.get("YOUTUBE_API_KEY")
+    if not youtube_api_key:
         return jsonify({"error": "Clé API YouTube non configurée. Veuillez définir YOUTUBE_API_KEY dans les variables d'environnement."}), 500
     
     try:
-        youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
+        youtube = build('youtube', 'v3', developerKey=youtube_api_key)
         
         search_response = youtube.search().list(
             q=query,
