@@ -14,11 +14,19 @@ def home():
     return jsonify({
         "message": "API de téléchargement YouTube",
         "endpoints": {
-            "download": "GET /download?video_url=URL_YOUTUBE",
+            "download": "GET /download?video_url=URL&qualite=360p&type=mp4",
             "info": "GET /info?video_url=URL_YOUTUBE",
             "recherche": "GET /recherche?video=NOM_VIDEO"
         },
-        "example": "/download?video_url=https://www.youtube.com/watch?v=VIDEO_ID"
+        "parametres_download": {
+            "video_url": "URL de la vidéo YouTube (requis)",
+            "qualite": "360p, 720p, 1080p (défaut: 360p)",
+            "type": "mp4 ou mp3 (défaut: mp4)"
+        },
+        "exemples": {
+            "video_mp4": "/download?video_url=https://www.youtube.com/watch?v=VIDEO_ID&qualite=720p&type=mp4",
+            "audio_mp3": "/download?video_url=https://www.youtube.com/watch?v=VIDEO_ID&type=mp3"
+        }
     })
 
 @app.route('/info', methods=['GET'])
@@ -142,21 +150,17 @@ def search_videos():
 @app.route('/download', methods=['GET'])
 def download_video():
     video_url = request.args.get('video_url')
-    resolution = request.args.get('resolution', '720p')
+    qualite = request.args.get('qualite', '360p')
+    file_type = request.args.get('type', 'mp4').lower()
     
     if not video_url:
         return jsonify({"error": "Paramètre 'video_url' requis"}), 400
     
+    if file_type not in ['mp3', 'mp4']:
+        return jsonify({"error": "Type invalide. Utilisez 'mp3' ou 'mp4'"}), 400
+    
     try:
         yt = YouTube(video_url)
-        
-        stream = yt.streams.filter(progressive=True, file_extension='mp4', resolution=resolution).first()
-        
-        if not stream:
-            stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
-        
-        if not stream:
-            return jsonify({"error": "Aucun flux vidéo disponible"}), 404
         
         for f in os.listdir(DOWNLOAD_FOLDER):
             file_path = os.path.join(DOWNLOAD_FOLDER, f)
@@ -165,17 +169,43 @@ def download_video():
             except:
                 pass
         
-        downloaded_file = stream.download(output_path=DOWNLOAD_FOLDER)
-        
         safe_title = "".join(c for c in yt.title if c.isalnum() or c in (' ', '-', '_')).rstrip()
-        filename = f"{safe_title}.mp4"
         
-        return send_file(
-            downloaded_file,
-            as_attachment=True,
-            download_name=filename,
-            mimetype='video/mp4'
-        )
+        if file_type == 'mp3':
+            stream = yt.streams.filter(only_audio=True).order_by('abr').desc().first()
+            
+            if not stream:
+                return jsonify({"error": "Aucun flux audio disponible"}), 404
+            
+            downloaded_file = stream.download(output_path=DOWNLOAD_FOLDER)
+            
+            filename = f"{safe_title}.mp3"
+            
+            return send_file(
+                downloaded_file,
+                as_attachment=True,
+                download_name=filename,
+                mimetype='audio/mpeg'
+            )
+        else:
+            stream = yt.streams.filter(progressive=True, file_extension='mp4', resolution=qualite).first()
+            
+            if not stream:
+                stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
+            
+            if not stream:
+                return jsonify({"error": "Aucun flux vidéo disponible"}), 404
+            
+            downloaded_file = stream.download(output_path=DOWNLOAD_FOLDER)
+            
+            filename = f"{safe_title}.mp4"
+            
+            return send_file(
+                downloaded_file,
+                as_attachment=True,
+                download_name=filename,
+                mimetype='video/mp4'
+            )
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
