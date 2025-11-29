@@ -7,7 +7,10 @@ import shutil
 import logging
 import time
 import random
+import requests
+import re
 from functools import wraps
+from urllib.parse import quote
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -224,6 +227,30 @@ def search_videos():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+def sanitize_filename(filename):
+    filename = re.sub(r'[<>:"/\\|?*]', '', filename)
+    filename = filename.strip()
+    if len(filename) > 100:
+        filename = filename[:100]
+    return filename if filename else "video"
+
+def generate_stream(stream_url, chunk_size=8192):
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Encoding': 'identity',
+            'Connection': 'keep-alive',
+        }
+        with requests.get(stream_url, headers=headers, stream=True, timeout=300) as r:
+            r.raise_for_status()
+            for chunk in r.iter_content(chunk_size=chunk_size):
+                if chunk:
+                    yield chunk
+    except Exception as e:
+        logger.error(f"Stream error: {e}")
+        raise
+
 @app.route('/download', methods=['GET'])
 def download_video():
     video_url = request.args.get('video_url')
@@ -239,13 +266,17 @@ def download_video():
     try:
         logger.debug(f"Download request for: {video_url}, type: {file_type}, quality: {qualite}")
         yt = create_youtube_with_retry(video_url)
-        logger.debug(f"YouTube object created for download, title: {yt.title}")
+        title = sanitize_filename(yt.title)
+        logger.debug(f"YouTube object created for download, title: {title}")
         
         if file_type == 'mp3':
             stream = yt.streams.filter(only_audio=True).order_by('abr').desc().first()
             
             if not stream:
                 return jsonify({"error": "Aucun flux audio disponible"}), 404
+            
+            mime_type = 'audio/mpeg'
+            extension = 'mp3'
         else:
             logger.debug(f"Looking for stream with resolution: {qualite}")
             stream = yt.streams.filter(progressive=True, file_extension='mp4', resolution=qualite).first()
@@ -256,12 +287,38 @@ def download_video():
             
             if not stream:
                 return jsonify({"error": "Aucun flux vidéo disponible"}), 404
+            
+            mime_type = 'video/mp4'
+            extension = 'mp4'
         
         logger.debug(f"Stream found: {stream}")
         stream_url = stream.url
-        logger.debug(f"Stream URL obtained")
+        logger.debug(f"Stream URL obtained, starting proxy download")
         
-        return redirect(stream_url)
+        try:
+            file_size = stream.filesize
+        except Exception:
+            file_size = None
+        
+        filename = f"{title}.{extension}"
+        encoded_filename = quote(filename)
+        
+        headers = {
+            'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}",
+            'Content-Type': mime_type,
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',
+        }
+        
+        if file_size:
+            headers['Content-Length'] = str(file_size)
+        
+        return Response(
+            generate_stream(stream_url),
+            headers=headers,
+            mimetype=mime_type,
+            direct_passthrough=True
+        )
         
     except Exception as e:
         logger.error(f"Download error: {e}")
