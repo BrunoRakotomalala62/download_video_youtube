@@ -114,23 +114,12 @@ def search_videos():
                     
                     video_url = f"https://www.youtube.com/watch?v={video_id}"
                     
-                    quality_info = []
-                    try:
-                        yt = YouTube(video_url)
-                        streams = yt.streams.filter(progressive=True, file_extension='mp4')
-                        for stream in streams:
-                            quality_info.append({
-                                "resolution": stream.resolution,
-                                "fps": stream.fps,
-                                "size_mb": round(stream.filesize / (1024 * 1024), 2) if stream.filesize else "inconnu"
-                            })
-                    except:
-                        quality_info = [{"resolution": "Utilisez /info pour les détails"}]
+                    definition = content_details.get('definition', 'sd').upper()
                     
                     videos.append({
                         "titre": snippet.get('title', ''),
                         "duree": duration_str.strip(),
-                        "qualites": quality_info,
+                        "qualite": definition,
                         "lien": video_url,
                         "miniature": snippet.get('thumbnails', {}).get('high', {}).get('url', ''),
                         "auteur": snippet.get('channelTitle', ''),
