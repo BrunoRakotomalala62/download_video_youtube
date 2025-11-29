@@ -116,12 +116,15 @@ def search_videos():
                     
                     definition = content_details.get('definition', 'sd').upper()
                     
+                    thumbnails = snippet.get('thumbnails', {})
+                    image_url = thumbnails.get('maxres', thumbnails.get('high', thumbnails.get('medium', {}))).get('url', '')
+                    
                     videos.append({
                         "titre": snippet.get('title', ''),
                         "duree": duration_str.strip(),
                         "qualite": definition,
                         "lien": video_url,
-                        "miniature": snippet.get('thumbnails', {}).get('high', {}).get('url', ''),
+                        "image_url": image_url,
                         "auteur": snippet.get('channelTitle', ''),
                         "vues": video.get('statistics', {}).get('viewCount', 'N/A')
                     })
