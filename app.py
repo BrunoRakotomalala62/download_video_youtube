@@ -1,9 +1,13 @@
-from flask import Flask, request, send_file, jsonify, Response, render_template
+from flask import Flask, request, send_file, jsonify, Response, render_template, redirect
 from pytubefix import YouTube
 from googleapiclient.discovery import build
 import os
 import tempfile
 import shutil
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
@@ -21,19 +25,28 @@ def get_video_info():
         return jsonify({"error": "Paramètre 'video_url' requis"}), 400
     
     try:
-        yt = YouTube(video_url, use_po_token=True)
+        logger.debug(f"Getting info for video: {video_url}")
+        yt = YouTube(video_url, 'WEB')
+        logger.debug(f"YouTube object created, getting title...")
+        title = yt.title
+        logger.debug(f"Title: {title}")
         streams = yt.streams.filter(progressive=True, file_extension='mp4')
+        logger.debug(f"Streams filtered")
         
         available_resolutions = []
         for stream in streams:
+            try:
+                size_mb = round(stream.filesize / (1024 * 1024), 2) if stream.filesize else "inconnu"
+            except Exception:
+                size_mb = "inconnu"
             available_resolutions.append({
                 "resolution": stream.resolution,
                 "fps": stream.fps,
-                "size_mb": round(stream.filesize / (1024 * 1024), 2) if stream.filesize else "inconnu"
+                "size_mb": size_mb
             })
         
         return jsonify({
-            "title": yt.title,
+            "title": title,
             "author": yt.author,
             "length_seconds": yt.length,
             "views": yt.views,
@@ -144,60 +157,34 @@ def download_video():
         return jsonify({"error": "Type invalide. Utilisez 'mp3' ou 'mp4'"}), 400
     
     try:
-        yt = YouTube(video_url, use_po_token=True)
-        
-        for f in os.listdir(DOWNLOAD_FOLDER):
-            file_path = os.path.join(DOWNLOAD_FOLDER, f)
-            try:
-                os.unlink(file_path)
-            except:
-                pass
-        
-        safe_title = "".join(c for c in yt.title if c.isalnum() or c in (' ', '-', '_')).rstrip()
+        logger.debug(f"Download request for: {video_url}, type: {file_type}, quality: {qualite}")
+        yt = YouTube(video_url, 'WEB')
+        logger.debug(f"YouTube object created for download, title: {yt.title}")
         
         if file_type == 'mp3':
             stream = yt.streams.filter(only_audio=True).order_by('abr').desc().first()
             
             if not stream:
                 return jsonify({"error": "Aucun flux audio disponible"}), 404
-            
-            downloaded_file = stream.download(output_path=DOWNLOAD_FOLDER)
-            
-            if not downloaded_file:
-                return jsonify({"error": "Échec du téléchargement"}), 500
-            
-            filename = f"{safe_title}.mp3"
-            
-            return send_file(
-                downloaded_file,
-                as_attachment=True,
-                download_name=filename,
-                mimetype='audio/mpeg'
-            )
         else:
+            logger.debug(f"Looking for stream with resolution: {qualite}")
             stream = yt.streams.filter(progressive=True, file_extension='mp4', resolution=qualite).first()
             
             if not stream:
+                logger.debug("Exact resolution not found, getting best available")
                 stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
             
             if not stream:
                 return jsonify({"error": "Aucun flux vidéo disponible"}), 404
-            
-            downloaded_file = stream.download(output_path=DOWNLOAD_FOLDER)
-            
-            if not downloaded_file:
-                return jsonify({"error": "Échec du téléchargement"}), 500
-            
-            filename = f"{safe_title}.mp4"
-            
-            return send_file(
-                downloaded_file,
-                as_attachment=True,
-                download_name=filename,
-                mimetype='video/mp4'
-            )
+        
+        logger.debug(f"Stream found: {stream}")
+        stream_url = stream.url
+        logger.debug(f"Stream URL obtained")
+        
+        return redirect(stream_url)
         
     except Exception as e:
+        logger.error(f"Download error: {e}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
