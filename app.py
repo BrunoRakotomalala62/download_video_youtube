@@ -21,7 +21,7 @@ def get_video_info():
         return jsonify({"error": "Paramètre 'video_url' requis"}), 400
     
     try:
-        yt = YouTube(video_url)
+        yt = YouTube(video_url, use_po_token=True)
         streams = yt.streams.filter(progressive=True, file_extension='mp4')
         
         available_resolutions = []
@@ -144,7 +144,7 @@ def download_video():
         return jsonify({"error": "Type invalide. Utilisez 'mp3' ou 'mp4'"}), 400
     
     try:
-        yt = YouTube(video_url)
+        yt = YouTube(video_url, use_po_token=True)
         
         for f in os.listdir(DOWNLOAD_FOLDER):
             file_path = os.path.join(DOWNLOAD_FOLDER, f)
@@ -162,6 +162,9 @@ def download_video():
                 return jsonify({"error": "Aucun flux audio disponible"}), 404
             
             downloaded_file = stream.download(output_path=DOWNLOAD_FOLDER)
+            
+            if not downloaded_file:
+                return jsonify({"error": "Échec du téléchargement"}), 500
             
             filename = f"{safe_title}.mp3"
             
@@ -181,6 +184,9 @@ def download_video():
                 return jsonify({"error": "Aucun flux vidéo disponible"}), 404
             
             downloaded_file = stream.download(output_path=DOWNLOAD_FOLDER)
+            
+            if not downloaded_file:
+                return jsonify({"error": "Échec du téléchargement"}), 500
             
             filename = f"{safe_title}.mp4"
             
