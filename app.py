@@ -1,4 +1,4 @@
-from flask import Flask, request, send_file, jsonify, Response
+from flask import Flask, request, send_file, jsonify, Response, render_template
 from pytubefix import YouTube
 from googleapiclient.discovery import build
 import os
@@ -11,23 +11,7 @@ DOWNLOAD_FOLDER = tempfile.mkdtemp()
 
 @app.route('/')
 def home():
-    return jsonify({
-        "message": "API de téléchargement YouTube",
-        "endpoints": {
-            "download": "GET /download?video_url=URL&qualite=360p&type=mp4",
-            "info": "GET /info?video_url=URL_YOUTUBE",
-            "recherche": "GET /recherche?video=NOM_VIDEO"
-        },
-        "parametres_download": {
-            "video_url": "URL de la vidéo YouTube (requis)",
-            "qualite": "360p, 720p, 1080p (défaut: 360p)",
-            "type": "mp4 ou mp3 (défaut: mp4)"
-        },
-        "exemples": {
-            "video_mp4": "/download?video_url=https://www.youtube.com/watch?v=VIDEO_ID&qualite=720p&type=mp4",
-            "audio_mp3": "/download?video_url=https://www.youtube.com/watch?v=VIDEO_ID&type=mp3"
-        }
-    })
+    return render_template('index.html')
 
 @app.route('/info', methods=['GET'])
 def get_video_info():
