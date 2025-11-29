@@ -251,6 +251,16 @@ def generate_stream(stream_url, chunk_size=8192):
         logger.error(f"Stream error: {e}")
         raise
 
+def download_audio_to_file(stream, output_path, filename):
+    try:
+        logger.debug(f"Downloading audio to {output_path}/{filename}")
+        downloaded_file = stream.download(output_path=output_path, filename=filename)
+        logger.debug(f"Audio downloaded: {downloaded_file}")
+        return downloaded_file
+    except Exception as e:
+        logger.error(f"Audio download error: {e}")
+        raise
+
 @app.route('/download', methods=['GET'])
 def download_video():
     video_url = request.args.get('video_url')
@@ -275,8 +285,49 @@ def download_video():
             if not stream:
                 return jsonify({"error": "Aucun flux audio disponible"}), 404
             
-            mime_type = 'audio/mpeg'
-            extension = 'mp3'
+            logger.debug(f"Audio stream found: {stream}")
+            
+            temp_filename = f"{title}_{int(time.time())}"
+            downloaded_file = download_audio_to_file(stream, DOWNLOAD_FOLDER, temp_filename)
+            
+            if not downloaded_file or not os.path.exists(downloaded_file):
+                return jsonify({"error": "Échec du téléchargement audio"}), 500
+            
+            final_filename = f"{title}.mp3"
+            encoded_filename = quote(final_filename)
+            audio_file_path = downloaded_file
+            
+            def generate_and_cleanup():
+                try:
+                    with open(audio_file_path, 'rb') as f:
+                        while True:
+                            chunk = f.read(8192)
+                            if not chunk:
+                                break
+                            yield chunk
+                finally:
+                    try:
+                        if os.path.exists(audio_file_path):
+                            os.remove(audio_file_path)
+                            logger.debug(f"Cleaned up temp file: {audio_file_path}")
+                    except Exception as cleanup_error:
+                        logger.error(f"Cleanup error: {cleanup_error}")
+            
+            file_size = os.path.getsize(audio_file_path)
+            
+            response_headers = {
+                'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}",
+                'Content-Type': 'audio/mpeg',
+                'Content-Length': str(file_size),
+                'Cache-Control': 'no-cache',
+            }
+            
+            return Response(
+                generate_and_cleanup(),
+                headers=response_headers,
+                mimetype='audio/mpeg',
+                direct_passthrough=True
+            )
         else:
             logger.debug(f"Looking for stream with resolution: {qualite}")
             stream = yt.streams.filter(progressive=True, file_extension='mp4', resolution=qualite).first()
@@ -290,35 +341,35 @@ def download_video():
             
             mime_type = 'video/mp4'
             extension = 'mp4'
-        
-        logger.debug(f"Stream found: {stream}")
-        stream_url = stream.url
-        logger.debug(f"Stream URL obtained, starting proxy download")
-        
-        try:
-            file_size = stream.filesize
-        except Exception:
-            file_size = None
-        
-        filename = f"{title}.{extension}"
-        encoded_filename = quote(filename)
-        
-        headers = {
-            'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}",
-            'Content-Type': mime_type,
-            'Cache-Control': 'no-cache',
-            'X-Accel-Buffering': 'no',
-        }
-        
-        if file_size:
-            headers['Content-Length'] = str(file_size)
-        
-        return Response(
-            generate_stream(stream_url),
-            headers=headers,
-            mimetype=mime_type,
-            direct_passthrough=True
-        )
+            
+            logger.debug(f"Stream found: {stream}")
+            stream_url = stream.url
+            logger.debug(f"Stream URL obtained, starting proxy download")
+            
+            try:
+                file_size = stream.filesize
+            except Exception:
+                file_size = None
+            
+            filename = f"{title}.{extension}"
+            encoded_filename = quote(filename)
+            
+            headers = {
+                'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}",
+                'Content-Type': mime_type,
+                'Cache-Control': 'no-cache',
+                'X-Accel-Buffering': 'no',
+            }
+            
+            if file_size:
+                headers['Content-Length'] = str(file_size)
+            
+            return Response(
+                generate_stream(stream_url),
+                headers=headers,
+                mimetype=mime_type,
+                direct_passthrough=True
+            )
         
     except Exception as e:
         logger.error(f"Download error: {e}")
