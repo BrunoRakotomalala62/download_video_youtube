@@ -5,6 +5,9 @@ import os
 import tempfile
 import shutil
 import logging
+import time
+import random
+from functools import wraps
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -12,6 +15,72 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 DOWNLOAD_FOLDER = tempfile.mkdtemp()
+
+CLIENT_TYPES = ['WEB', 'ANDROID', 'IOS', 'WEB_EMBED', 'WEB_MUSIC']
+
+def retry_with_backoff(max_retries=3, base_delay=2, max_delay=30):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception: Exception = Exception("Unknown error")
+            for attempt in range(max_retries):
+                try:
+                    time.sleep(random.uniform(0.5, 1.5))
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_exception = e
+                    error_str = str(e).lower()
+                    if '429' in error_str or 'too many requests' in error_str:
+                        delay = min(base_delay * (2 ** attempt) + random.uniform(0, 1), max_delay)
+                        logger.warning(f"Rate limited (429). Attempt {attempt + 1}/{max_retries}. Waiting {delay:.1f}s...")
+                        time.sleep(delay)
+                    elif '403' in error_str:
+                        delay = random.uniform(2, 5)
+                        logger.warning(f"Access denied (403). Attempt {attempt + 1}/{max_retries}. Waiting {delay:.1f}s...")
+                        time.sleep(delay)
+                    else:
+                        raise e
+            raise last_exception
+        return wrapper
+    return decorator
+
+def create_youtube_with_retry(video_url, max_retries=3):
+    last_exception: Exception = Exception("Failed to connect to YouTube")
+    for client_type in CLIENT_TYPES[:max_retries]:
+        try:
+            time.sleep(random.uniform(0.3, 1.0))
+            logger.debug(f"Trying client type: {client_type}")
+            yt = YouTube(video_url, client_type)
+            _ = yt.title
+            return yt
+        except Exception as e:
+            last_exception = e
+            error_str = str(e).lower()
+            if '429' in error_str or 'too many requests' in error_str:
+                delay = random.uniform(3, 8)
+                logger.warning(f"Rate limited with {client_type}. Waiting {delay:.1f}s before trying next client...")
+                time.sleep(delay)
+            elif '403' in error_str:
+                delay = random.uniform(1, 3)
+                logger.warning(f"Access denied with {client_type}. Trying next client...")
+                time.sleep(delay)
+            else:
+                logger.error(f"Error with {client_type}: {e}")
+                continue
+    
+    for attempt in range(2):
+        try:
+            delay = random.uniform(5, 15)
+            logger.info(f"Final retry attempt {attempt + 1}. Waiting {delay:.1f}s...")
+            time.sleep(delay)
+            yt = YouTube(video_url, 'ANDROID')
+            _ = yt.title
+            return yt
+        except Exception as e:
+            last_exception = e
+            continue
+    
+    raise last_exception
 
 @app.route('/')
 def home():
@@ -26,7 +95,7 @@ def get_video_info():
     
     try:
         logger.debug(f"Getting info for video: {video_url}")
-        yt = YouTube(video_url, 'WEB')
+        yt = create_youtube_with_retry(video_url)
         logger.debug(f"YouTube object created, getting title...")
         title = yt.title
         logger.debug(f"Title: {title}")
@@ -54,6 +123,13 @@ def get_video_info():
             "available_streams": available_resolutions
         })
     except Exception as e:
+        error_str = str(e).lower()
+        if '429' in error_str or 'too many requests' in error_str:
+            return jsonify({
+                "error": "YouTube limite temporairement les requêtes. Veuillez réessayer dans 30 secondes.",
+                "retry_after": 30,
+                "code": 429
+            }), 429
         return jsonify({"error": str(e)}), 500
 
 @app.route('/recherche', methods=['GET'])
@@ -95,6 +171,8 @@ def search_videos():
             next_page_token = search_response.get('nextPageToken')
             if not next_page_token:
                 break
+            
+            time.sleep(random.uniform(0.1, 0.3))
         
         all_video_ids = all_video_ids[:max_results]
         
@@ -133,6 +211,8 @@ def search_videos():
                         "auteur": snippet.get('channelTitle', ''),
                         "vues": video.get('statistics', {}).get('viewCount', 'N/A')
                     })
+                
+                time.sleep(random.uniform(0.1, 0.2))
         
         return jsonify({
             "recherche": query,
@@ -158,7 +238,7 @@ def download_video():
     
     try:
         logger.debug(f"Download request for: {video_url}, type: {file_type}, quality: {qualite}")
-        yt = YouTube(video_url, 'WEB')
+        yt = create_youtube_with_retry(video_url)
         logger.debug(f"YouTube object created for download, title: {yt.title}")
         
         if file_type == 'mp3':
@@ -185,6 +265,13 @@ def download_video():
         
     except Exception as e:
         logger.error(f"Download error: {e}")
+        error_str = str(e).lower()
+        if '429' in error_str or 'too many requests' in error_str:
+            return jsonify({
+                "error": "YouTube limite temporairement les requêtes. Veuillez réessayer dans 30 secondes.",
+                "retry_after": 30,
+                "code": 429
+            }), 429
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
